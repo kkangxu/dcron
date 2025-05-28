@@ -752,6 +752,7 @@ func (r *zookeeperRegistry) tryCleanupHistoryExecKeys(ctx context.Context) error
 		return err
 	}
 
+	var counter int
 	for _, child := range children {
 		fullPath := fmt.Sprintf("%s/%s", zkTaskLastExec, child)
 
@@ -768,8 +769,11 @@ func (r *zookeeperRegistry) tryCleanupHistoryExecKeys(ctx context.Context) error
 				logger.Errorf("Failed to delete outdated execution history node '%s': %v", fullPath, err)
 				continue
 			}
+			counter++
 		}
 	}
+
+	logger.Infof("Successfully, %d historical data have been deleted from Zookeeper.", counter)
 
 	return nil
 }

@@ -916,6 +916,8 @@ func (r *consulRegistry) batchDelete(keys []string) error {
 		}
 		return fmt.Errorf("batch delete transaction failed for an unknown reason, check Consul logs for more information")
 	}
-	logger.Infof("Successfully batch deleted %d keys from Consul KV.", len(keys))
+
+	logger.Infof("Successfully, %d historical data have been deleted from Consul.", len(keys))
+
 	return nil
 }
