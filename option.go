@@ -63,3 +63,10 @@ func WithWeight(weight int) Option {
 		dc.weight = weight
 	}
 }
+
+// WithIP sets the node IP for identification
+func WithIP(ip string) Option {
+	return func(dc *dcron) {
+		dc.nodeIP = ip
+	}
+}

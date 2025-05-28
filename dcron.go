@@ -202,12 +202,8 @@ type dcron struct {
 func NewDcron(registry Registry, opts ...Option) Dcron {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ip := getLocalIP()
-
 	dc := &dcron{
 		registry:       registry,
-		nodeID:         generateNodeID(ip),
-		nodeIP:         ip,
 		allTasks:       make(map[string]*task),
 		assignedTasks:  make(map[string]*task),
 		deletedTasks:   make(map[string]struct{}),
@@ -225,11 +221,17 @@ func NewDcron(registry Registry, opts ...Option) Dcron {
 	// Create a new cron instance
 	dc.cr = cron.New(dc.cOptions...)
 
-	// Init assigner
+	// Init default assigner
 	if dc.assigner == nil {
 		dc.assigner = NewAssigner(StrategyConsistent)
 	}
 	dc.assigner.SetNodeID(dc.nodeID)
+
+	// Set default node ID and IP
+	if len(dc.nodeIP) == 0 {
+		dc.nodeIP = getLocalIP()
+	}
+	dc.nodeID = generateNodeID(dc.nodeIP)
 
 	// Set default logger
 	if logger == nil {
