@@ -8,8 +8,7 @@ import (
 )
 
 const (
-	localIP    = "127.0.0.1"
-	TimeLayout = "20060102T150405"
+	localIP = "127.0.0.1"
 )
 
 // getLocalIP returns the first non-loopback IPv4 address of the local machine.

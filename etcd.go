@@ -421,9 +421,9 @@ func (r *etcdRegistry) WatchDeletedTaskEvent(ctx context.Context) (<-chan struct
 func (r *etcdRegistry) CanRunTask(ctx context.Context, taskName string, execTime time.Time) (bool, error) {
 
 	// task key format
-	// /distributed_cron/last_exec/20250526T000905:task-every-5s-1
+	// /distributed_cron/last_exec/1748446976-task-every-7s-87
 
-	key := etcdTaskLastExecPrefix + execTime.Format(TimeLayout) + "-" + taskName
+	key := etcdTaskLastExecPrefix + fmt.Sprintf("%d", execTime.Unix()) + "-" + taskName
 	// create transaction
 	txn := r.client.Txn(ctx)
 
@@ -452,57 +452,6 @@ func (r *etcdRegistry) CanRunTask(ctx context.Context, taskName string, execTime
 	return resp.Succeeded, nil
 }
 
-// CanRunTaskV1 checks if a task can be run at the specified execution time
-func (r *etcdRegistry) CanRunTaskV1(ctx context.Context, taskName string, execTime time.Time) (bool, error) {
-	key := etcdTaskLastExecPrefix + taskName
-	execTimeStr := execTime.Format(time.RFC3339Nano)
-
-	// Use a transaction to atomically execute all operations
-	txnResp, err := r.client.Txn(ctx).
-		// Branch 1: If key doesn't exist, create it directly
-		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
-		Then(clientv3.OpPut(key, execTimeStr)).
-		// Branch 2: If key exists, check the timestamp and update
-		Else(clientv3.OpGet(key)).
-		Commit()
-
-	if err != nil {
-		return false, fmt.Errorf("etcd transaction failed during task execution attempt: %v", err)
-	}
-
-	// Branch 1: Key doesn't exist and was created successfully
-	if txnResp.Succeeded {
-		return true, nil
-	}
-
-	// Branch 2: Key already exists, check the timestamp
-	if len(txnResp.Responses[0].GetResponseRange().Kvs) == 0 {
-		return false, fmt.Errorf("etcd inconsistent state: key disappeared")
-	}
-
-	storedTimeStr := string(txnResp.Responses[0].GetResponseRange().Kvs[0].Value)
-	storedTime, err := time.Parse(time.RFC3339Nano, storedTimeStr)
-	if err != nil {
-		return false, fmt.Errorf("unable to parse stored timestamp from etcd record: %v", err)
-	}
-
-	// If timestamps are the same (second level), reject execution
-	if storedTime.Unix() == execTime.Unix() {
-		return false, nil
-	}
-
-	// Use another transaction to update the timestamp
-	updateResp, err := r.client.Txn(ctx).
-		If(clientv3.Compare(clientv3.Value(key), "=", storedTimeStr)).
-		Then(clientv3.OpPut(key, execTimeStr)).
-		Commit()
-
-	if err != nil {
-		return false, fmt.Errorf("etcd update transaction failed during task execution attempt: %v", err)
-	}
-	return updateResp.Succeeded, nil
-}
-
 func (r *etcdRegistry) batchDeleteExecKeys(keys []string) error {
 	ops := make([]clientv3.Op, len(keys))
 	for i := 0; i < len(keys); i++ {
@@ -521,9 +470,9 @@ func (r *etcdRegistry) batchDeleteExecKeys(keys []string) error {
 
 func (r *etcdRegistry) cleanupHistoryExecKeys(ctx context.Context) {
 	// task key format
-	// /distributed_cron/last_exec/20250526T000905:task-every-5s-1
+	// /distributed_cron/last_exec/2025-05-28T19:42:00+08:00:task-every-5s-1
 
-	ticker := time.NewTicker(20 * time.Minute)
+	ticker := time.NewTicker(CleanupHistoryExecKeysTickerDuration)
 	defer ticker.Stop()
 
 	if err := r.tryCleanupHistoryExecKeys(ctx); err != nil {
@@ -541,24 +490,14 @@ func (r *etcdRegistry) cleanupHistoryExecKeys(ctx context.Context) {
 		}
 	}
 }
-
 func (r *etcdRegistry) tryCleanupHistoryExecKeys(ctx context.Context) error {
-	// Get the time point exactly one hour ago
-	threshold := time.Now().Add(-CleanupHistoryExecKeysThresholdDuration).Format(TimeLayout)
 
-	logger.Infof("Starting cleanup of historical execution keys older than timestamp %s", threshold)
+	// one year ago of data key
+	startKey := etcdTaskLastExecPrefix + fmt.Sprintf("%d", time.Now().Add(-365*24*time.Hour).Unix())
+	// ten minutes of data key
+	endKey := etcdTaskLastExecPrefix + fmt.Sprintf("%d", time.Now().Add(-CleanupHistoryExecKeysThresholdDuration).Unix())
 
-	// Construct a safe range:
-	// Start key: prefix + "00000000T000000" (earliest possible time)
-	// End key: prefix + threshold (strictly less than this time)
-	startKey := etcdTaskLastExecPrefix + "00000000T000000"
-	endKey := etcdTaskLastExecPrefix + threshold
-
-	// Double check time format
-	if _, err := time.Parse(TimeLayout, threshold); err != nil {
-		logger.Errorf("Invalid time format provided for historical key cleanup threshold: %v", err)
-		return fmt.Errorf("invalid time format for cleanup threshold, expected RFC3339 format: %v", err)
-	}
+	logger.Infof("Starting cleanup of historical execution keys older than timestamp %s", endKey)
 
 	// Perform range deletion (use WithRange to ensure only keys in the range are deleted)
 	resp, err := r.client.Delete(ctx, startKey, clientv3.WithRange(endKey))
@@ -567,7 +506,7 @@ func (r *etcdRegistry) tryCleanupHistoryExecKeys(ctx context.Context) error {
 		return fmt.Errorf("problem deleting historical execution keys from etcd, cleanup operation incomplete: %v", err)
 	}
 
-	logger.Infof("Historical execution key cleanup completed successfully: removed %d keys older than %s", resp.Deleted, threshold)
+	logger.Infof("Historical execution key cleanup completed successfully: removed %d keys older than %s", resp.Deleted, endKey)
 	return nil
 }
 

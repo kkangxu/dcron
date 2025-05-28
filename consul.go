@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,15 +66,18 @@ func (r *consulRegistry) Register(ctx context.Context, node Node) error {
 	// register node
 	r.serviceID = node.ID
 	registration := &api.AgentServiceRegistration{
-		ID:   node.ID,
+		ID:   r.serviceID,
 		Name: r.serviceName,
 		Tags: []string{string(node.Status)},
 		Meta: map[string]string{
-			"ip":       node.IP,
-			"hostname": node.Hostname,
+			"ip":          node.IP,
+			"hostname":    node.Hostname,
+			"weight":      fmt.Sprintf("%d", node.Weight),
+			"create_time": node.CreateTime.Format(time.RFC3339),
+			"last_alive":  node.LastAlive.Format(time.RFC3339),
 		},
 		Check: &api.AgentServiceCheck{
-			CheckID:                        fmt.Sprintf("%s-check", node.ID),
+			CheckID:                        fmt.Sprintf("%s-check", r.serviceID),
 			TTL:                            consulCheckTimeout,
 			DeregisterCriticalServiceAfter: "1m",
 		},
@@ -144,6 +148,7 @@ func (r *consulRegistry) Unregister(ctx context.Context, nodeID string) error {
 // It modifies the service tags to reflect the new status
 func (r *consulRegistry) UpdateStatus(ctx context.Context, nodeID string, status NodeStatus) error {
 	// query services directly by node ID (instead of filtering by status)
+	// serviceID == nodeID, in consul
 	service, _, err := r.client.Agent().Service(nodeID, nil)
 	if err != nil {
 		return fmt.Errorf("error querying node '%s' information, service might not exist: %v", nodeID, err)
@@ -159,6 +164,7 @@ func (r *consulRegistry) UpdateStatus(ctx context.Context, nodeID string, status
 		}
 	}
 	newTags = append(newTags, string(status)) // add new status label
+	service.Meta["last_alive"] = time.Now().Format(time.RFC3339)
 
 	// update service registration information
 	registration := &api.AgentServiceRegistration{
@@ -201,11 +207,18 @@ func (r *consulRegistry) GetNodes(ctx context.Context) ([]Node, error) {
 			status = NodeStatus(service.ServiceTags[0])
 		}
 
+		weight, _ := strconv.Atoi(service.ServiceMeta["weight"])
+		createTime, _ := time.Parse(time.RFC3339, service.ServiceMeta["create_time"])
+		lastAlive, _ := time.Parse(time.RFC3339, service.ServiceMeta["last_alive"])
+
 		nodes = append(nodes, Node{
-			ID:       service.ServiceID,
-			IP:       service.ServiceMeta["ip"],
-			Hostname: service.ServiceMeta["hostname"],
-			Status:   status,
+			ID:         service.ServiceID,
+			IP:         service.ServiceMeta["ip"],
+			Hostname:   service.ServiceMeta["hostname"],
+			Status:     status,
+			Weight:     weight,
+			CreateTime: createTime,
+			LastAlive:  lastAlive,
 		})
 	}
 
@@ -232,11 +245,17 @@ func (r *consulRegistry) GetWorkingNodes(ctx context.Context) ([]Node, error) {
 			continue
 		}
 
+		weight, _ := strconv.Atoi(service.Service.Meta["weight"])
+		lastAlive, _ := time.Parse(time.RFC3339, service.Service.Meta["last_alive"])
+		createTime, _ := time.Parse(time.RFC3339, service.Service.Meta["create_time"])
 		nodes = append(nodes, Node{
-			ID:       service.Service.ID,
-			IP:       service.Service.Meta["ip"],
-			Hostname: service.Service.Meta["hostname"],
-			Status:   status,
+			ID:         service.Service.ID,
+			IP:         service.Service.Meta["ip"],
+			Hostname:   service.Service.Meta["hostname"],
+			Status:     status,
+			Weight:     weight,
+			CreateTime: createTime,
+			LastAlive:  lastAlive,
 		})
 	}
 
@@ -278,10 +297,12 @@ func (r *consulRegistry) WatchNodes(ctx context.Context) (<-chan NodeEvent, erro
 		// currentNodes holds the current state of nodes from the watch event
 		currentNodes := make(map[string]Node)
 		for _, s := range services {
+			weight, _ := strconv.Atoi(s.Service.Meta["weight"])
 			node := Node{
 				ID:       s.Service.ID,
 				IP:       s.Service.Meta["ip"],
 				Hostname: s.Service.Meta["hostname"],
+				Weight:   weight,
 			}
 			if len(s.Service.Tags) > 0 {
 				node.Status = NodeStatus(s.Service.Tags[0])
@@ -627,7 +648,7 @@ func (r *consulRegistry) WatchDeletedTaskEvent(ctx context.Context) (<-chan stru
 // If the key creation is successful (meaning it didn't exist), the task can run.
 func (r *consulRegistry) CanRunTask(ctx context.Context, taskName string, execTime time.Time) (bool, error) {
 	// Construct the key using the task execution prefix, formatted time, and task name
-	key := consulKVTaskLastExec + execTime.Format(TimeLayout) + "-" + taskName
+	key := consulKVTaskLastExec + execTime.Format(time.RFC3339) + "-" + taskName
 
 	// try to atomically write (only when Key does not exist)
 	success, _, err := r.client.KV().CAS(&api.KVPair{
@@ -754,7 +775,7 @@ func (r *consulRegistry) batchDeleteExecKeys(keys []string) error {
 // It runs on a ticker and calls tryCleanupHistoryExecKeys to perform the actual cleanup logic.
 func (r *consulRegistry) cleanupHistoryExecKeys(ctx context.Context) {
 	// Create a ticker for periodic cleanup (e.g., every 20 minutes).
-	ticker := time.NewTicker(20 * time.Minute) // TODO: Make this interval configurable
+	ticker := time.NewTicker(CleanupHistoryExecKeysTickerDuration) // TODO: Make this interval configurable
 	defer ticker.Stop()
 
 	// Perform an initial cleanup immediately.
@@ -782,50 +803,87 @@ func (r *consulRegistry) cleanupHistoryExecKeys(ctx context.Context) {
 // tryCleanupHistoryExecKeys performs the actual cleanup of historical task execution keys.
 // It lists keys under consulKVTaskLastExec, identifies expired keys, and batch deletes them.
 func (r *consulRegistry) tryCleanupHistoryExecKeys(ctx context.Context) error {
-	// List all keys under the task execution prefix.
-	// The empty second argument to Keys means no separator, effectively listing all keys under the prefix.
-	keys, _, err := r.client.KV().Keys(consulKVTaskLastExec, "", nil)
-	if err != nil {
-		return fmt.Errorf("problem listing task execution keys for cleanup, cannot retrieve historical execution records: %v", err)
-	}
-
-	// If no keys are found, there's nothing to clean up.
-	if len(keys) == 0 {
-		logger.Debugf("No task execution keys found under prefix '%s' for cleanup.", consulKVTaskLastExec)
-		return nil
-	}
-
+	const pageSize = 1000 // Number of keys to process in each batch
 	var toDelete []string
 
-	for _, key := range keys {
-		// Keys are expected to be in the format: consulKVTaskLastExec + YYYYMMDDTHHMMSS-taskName
-		// Example: /dcron/tasks_exec_time/20230102T030405-my-task
-		// We need to extract the time part from the key.
-		// First, remove the prefix.
-		keyWithoutPrefix := strings.TrimPrefix(key, consulKVTaskLastExec)
-		// The time part should be at the beginning of keyWithoutPrefix, up to TimeLayout length.
-		if len(keyWithoutPrefix) < len(TimeLayout) {
-			logger.Warnf("Skipping key '%s' during cleanup: too short to contain a valid timestamp.", key)
-			continue
-		}
-		timePart := keyWithoutPrefix[:len(TimeLayout)]
-		execTime, err := time.Parse(TimeLayout, timePart)
+	// Initialize pagination
+	var after string
+	var allProcessed bool
+
+	for !allProcessed {
+		// Use 'after' as the pagination marker
+		keys, _, err := r.client.KV().Keys(consulKVTaskLastExec, after, &api.QueryOptions{})
 		if err != nil {
-			logger.Warnf("Skipping key '%s' during cleanup: failed to parse time part '%s': %v", key, timePart, err)
-			continue
+			return fmt.Errorf("failed to list task execution keys for cleanup: %v", err)
 		}
 
-		// If the execution time is older than the cleanup threshold, mark it for deletion.
-		if time.Now().Sub(execTime) >= CleanupHistoryExecKeysThresholdDuration {
-			toDelete = append(toDelete, key)
+		// If no keys found, end processing
+		if len(keys) == 0 {
+			logger.Debugf("No more task execution keys found under prefix '%s' for cleanup.", consulKVTaskLastExec)
+			break
+		}
+
+		logger.Debugf("Processing batch of %d keys for cleanup", len(keys))
+
+		// Process this batch of keys
+		for _, key := range keys {
+			// Extract timestamp and check for expiration
+			keyWithoutPrefix := strings.TrimPrefix(key, consulKVTaskLastExec)
+			if len(keyWithoutPrefix) < len(time.RFC3339) {
+				logger.Warnf("Skipping key '%s' during cleanup: too short to contain a valid timestamp.", key)
+				continue
+			}
+
+			timePart := keyWithoutPrefix[:len(time.RFC3339)]
+			execTime, err := time.Parse(time.RFC3339, timePart)
+			if err != nil {
+				logger.Warnf("Skipping key '%s' during cleanup: failed to parse time part '%s': %v", key, timePart, err)
+				continue
+			}
+
+			// If the execution time is older than the cleanup threshold, mark it for deletion
+			if time.Since(execTime) >= CleanupHistoryExecKeysThresholdDuration {
+				toDelete = append(toDelete, key)
+			}
+		}
+
+		// If we received fewer keys than the page size, we've processed all keys
+		if len(keys) < pageSize {
+			allProcessed = true
+		} else {
+			// Set the starting point for the next batch
+			after = keys[len(keys)-1]
+		}
+
+		// If we've collected enough keys for batch deletion, or processed all keys
+		if len(toDelete) >= CleanerBatchSize || allProcessed {
+			if len(toDelete) > 0 {
+
+				for i := 0; i < len(toDelete); i += CleanerBatchSize {
+					end := i + CleanerBatchSize
+					if end > len(toDelete) {
+						end = len(toDelete)
+					}
+
+					batch := toDelete[i:end]
+					logger.Infof("Attempting to batch delete %d expired task execution keys.", len(batch))
+					if err := r.batchDelete(batch); err != nil {
+						return err
+					}
+				}
+
+				// Reset the deletion batch
+				toDelete = nil
+			}
 		}
 	}
 
-	// Perform batch deletion if there are keys to delete.
+	// Process the last keys
 	if len(toDelete) > 0 {
 		logger.Infof("Attempting to batch delete %d expired task execution keys.", len(toDelete))
-		return r.batchDelete(toDelete) // Use the generic batchDelete for KV operations
+		return r.batchDelete(toDelete)
 	}
+
 	logger.Infof("No expired task execution keys found to delete.")
 	return nil
 }

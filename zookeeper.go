@@ -661,9 +661,9 @@ func (r *zookeeperRegistry) deleteRecursively(path string) error {
 func (r *zookeeperRegistry) CanRunTask(ctx context.Context, taskName string, execTime time.Time) (bool, error) {
 
 	// task key format
-	// /distributed_cron/last_exec/20250526T000905:task-every-5s-1
+	// /distributed_cron/last_exec/2025-05-28T19:42:00+08:00:task-every-5s-1
 
-	taskKey := fmt.Sprintf("%s-%s", execTime.Format(TimeLayout), taskName)
+	taskKey := fmt.Sprintf("%s-%s", execTime.Format(time.RFC3339), taskName)
 	key := path.Join(zkTaskLastExec, taskKey)
 
 	_, err := r.conn.Create(key, []byte(""), 0, zk.WorldACL(zk.PermAll))
@@ -683,40 +683,6 @@ func (r *zookeeperRegistry) CanRunTask(ctx context.Context, taskName string, exe
 	}
 
 	return true, nil
-}
-
-func (r *zookeeperRegistry) compareAndSetExecTime(key string, execTimeBytes []byte) (bool, error) {
-	data, stat, err := r.conn.Get(key)
-	if err != nil {
-		return false, fmt.Errorf("failed to get current value: %v", err)
-	}
-
-	execTime, err := time.Parse(time.RFC3339Nano, string(execTimeBytes))
-	if err != nil {
-		return false, fmt.Errorf("failed to parse new execution time: %v", err)
-	}
-
-	storedTime, err := time.Parse(time.RFC3339Nano, string(data))
-	if err != nil {
-		return false, fmt.Errorf("failed to parse stored execution time: %v", err)
-	}
-
-	// Use second level comparison to reduce conflicts
-	if storedTime.Unix() == execTime.Unix() {
-		return false, nil
-	}
-
-	// Try conditional update
-	_, err = r.conn.Set(key, execTimeBytes, stat.Version)
-	if err == nil {
-		return true, nil
-	}
-
-	if !errors.Is(err, zk.ErrBadVersion) {
-		return false, fmt.Errorf("failed to update execution time: %v", err)
-	}
-
-	return false, nil
 }
 
 func (r *zookeeperRegistry) RemoveTaskDeleted(ctx context.Context, taskName string) error {
@@ -757,7 +723,7 @@ func (r *zookeeperRegistry) batchDeleteExecKeys(keys []string) error {
 
 // Start scheduled cleanup service
 func (r *zookeeperRegistry) cleanupHistoryExecKeys(ctx context.Context) {
-	ticker := time.NewTicker(20 * time.Minute)
+	ticker := time.NewTicker(CleanupHistoryExecKeysTickerDuration)
 	defer ticker.Stop()
 
 	// Execute cleanup immediately at startup
@@ -790,14 +756,14 @@ func (r *zookeeperRegistry) tryCleanupHistoryExecKeys(ctx context.Context) error
 		fullPath := fmt.Sprintf("%s/%s", zkTaskLastExec, child)
 
 		// Extract time part (20230102T030405:task-1 → 20230102T030405)
-		timePart := child[:len(TimeLayout)]
-		nodeTime, err := time.Parse(TimeLayout, timePart)
+		timePart := child[:len(time.RFC3339)]
+		nodeTime, err := time.Parse(time.RFC3339, timePart)
 		if err != nil {
 			logger.Errorf("child[%s] parse time err: %v", child, err)
 			continue
 		}
 
-		if time.Now().Sub(nodeTime) > CleanupHistoryExecKeysThresholdDuration {
+		if time.Since(nodeTime) > CleanupHistoryExecKeysThresholdDuration {
 			if err = r.conn.Delete(fullPath, -1); err != nil {
 				logger.Errorf("Failed to delete outdated execution history node '%s': %v", fullPath, err)
 				continue

@@ -56,13 +56,14 @@ type TaskMetaEvent struct {
 }
 
 const (
-	NodeEventChannelSize                    = 64              // Size of the node event channel
-	TaskEventChannelSize                    = 256             // Size of the task event channel
-	RebalancedChanelSize                    = 512             // Size of the rebalanced channel
-	CleanerBufferSize                       = 1024            // Buffer size for cleaner
-	CleanerBatchSize                        = 20              // Batch size for cleaner
-	CleanerDelay                            = 5 * time.Second // Delay before cleaning up expired exec keys
-	CleanupHistoryExecKeysThresholdDuration = 1 * time.Hour   // Cleanup history exec keys threshold duration
+	NodeEventChannelSize                    = 64               // Size of the node event channel
+	TaskEventChannelSize                    = 256              // Size of the task event channel
+	RebalancedChanelSize                    = 512              // Size of the rebalanced channel
+	CleanerBufferSize                       = 1024             // Buffer size for cleaner
+	CleanerBatchSize                        = 64               // Batch size for cleaner
+	CleanerDelay                            = 5 * time.Second  // Delay before cleaning up expired exec keys
+	CleanupHistoryExecKeysThresholdDuration = 10 * time.Minute // Cleanup history exec keys threshold duration
+	CleanupHistoryExecKeysTickerDuration    = 1 * time.Minute  // Cleanup history exec keys ticker duration
 )
 
 // Registry defines the interface that all registry backends must implement

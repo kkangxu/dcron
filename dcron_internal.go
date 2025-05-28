@@ -90,8 +90,6 @@ func (dc *dcron) reloadNodes() bool {
 		for _, n := range nodes {
 			nodeIDs = append(nodeIDs, n.ID)
 		}
-
-		sort.Strings(nodeIDs)
 		newHash = crc32.ChecksumIEEE([]byte(strings.Join(nodeIDs, ",")))
 	}
 
@@ -104,7 +102,6 @@ func (dc *dcron) reloadNodes() bool {
 		for _, n := range dc.nodes {
 			nodeIDs = append(nodeIDs, n.ID)
 		}
-		sort.Strings(nodeIDs)
 
 		oldHash = crc32.ChecksumIEEE([]byte(strings.Join(nodeIDs, ",")))
 	}

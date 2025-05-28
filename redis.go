@@ -453,7 +453,7 @@ func (r *redisRegistry) ForceCleanupAllTasks(ctx context.Context) error {
 // CanRunTask checks if a task can be run at the specified execution time.
 // It uses a Redis lock to prevent concurrent execution.
 func (r *redisRegistry) CanRunTask(ctx context.Context, taskName string, execTime time.Time) (bool, error) {
-	key := redisKeyTaskLastExecPrefix + taskName + ":" + execTime.Format(TimeLayout)
+	key := redisKeyTaskLastExecPrefix + taskName + ":" + execTime.Format(time.RFC3339)
 
 	success, err := r.client.SetNX(ctx, key, "", 5*time.Second).Result()
 	if err != nil {
