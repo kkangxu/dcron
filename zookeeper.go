@@ -276,43 +276,91 @@ func (r *zookeeperRegistry) GetWorkingNodes(ctx context.Context) ([]Node, error)
 func (r *zookeeperRegistry) WatchNodes(ctx context.Context) (<-chan NodeEvent, error) {
 	eventChan := make(chan NodeEvent, NodeEventChannelSize)
 
-	// Initialize watcher for node changes
+	// Initialize the watch
 	_, _, watcher, err := r.conn.ChildrenW(zkNodePrefix)
 	if err != nil {
-		return nil, fmt.Errorf("failed to watch children: %w", err)
+		return nil, fmt.Errorf("initial watch failed: %w", err)
 	}
 
-	// Start a goroutine to listen for changes to the children
+	// Send initial event (empty change notification)
+	eventChan <- NodeEvent{Type: NodeEventTypeChanged}
+
 	go func() {
 		defer close(eventChan)
+		currentWatcher := watcher
+		retryDelay := time.Second
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case event := <-watcher:
-				if event.Type != zk.EventNodeChildrenChanged {
-					// Only handle children changed events
+
+			case event, ok := <-currentWatcher:
+				// Watch channel abnormally closed
+				if !ok {
+					if newWatcher, err := r.reestablishWatch(); err == nil {
+						currentWatcher = newWatcher
+						retryDelay = time.Second // Reset delay
+						continue
+					}
+					time.Sleep(retryDelay)
+					retryDelay = min(retryDelay*2, 30*time.Second)
 					continue
 				}
 
-				// Re-acquire children and update watcher
+				// Event types that require watch rebuilding
+				if event.Type == zk.EventNotWatching ||
+					event.Type == zk.EventNodeDeleted ||
+					event.Type == zk.EventSession {
+					logger.Warnf("Watch invalidated by event: %v", event.Type)
+					if newWatcher, err := r.reestablishWatch(); err == nil {
+						currentWatcher = newWatcher
+						continue
+					}
+					// Continue waiting for the next retry on rebuild failure
+					continue
+				}
+
+				// Ignore non-child node change events
+				if event.Type != zk.EventNodeChildrenChanged {
+					logger.Debugf("Ignoring event type: %v", event.Type)
+					continue
+				}
+
+				// Normal handling of child node changes
 				newNodes, _, newWatcher, err := r.conn.ChildrenW(zkNodePrefix)
 				if err != nil {
-					logger.Errorf("[WARN] ChildrenW failed: %v", err)
+					logger.Errorf("Failed to update watch: %v", err)
 					continue
 				}
 
-				watcher = newWatcher
-				logger.Infof("Node membership updated: cluster now has %d active nodes", len(newNodes))
-
-				// Trigger a node change event (no distinction between addition/deletion, just notify change)
+				currentWatcher = newWatcher
+				logger.Infof("Node changed, current count: %d", len(newNodes))
 				eventChan <- NodeEvent{Type: NodeEventTypeChanged}
 			}
 		}
 	}()
 
 	return eventChan, nil
+}
+
+// reestablishWatch is a dedicated method for rebuilding the watch
+func (r *zookeeperRegistry) reestablishWatch() (<-chan zk.Event, error) {
+	// Check if parent node exists (for EventNodeDeleted case)
+	exists, _, err := r.conn.Exists(zkNodePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("check node existence failed: %w", err)
+	}
+	if !exists {
+		return nil, fmt.Errorf("watched node %s does not exist", zkNodePrefix)
+	}
+
+	// Re-establish the watch
+	_, _, watcher, err := r.conn.ChildrenW(zkNodePrefix)
+	if err != nil {
+		return nil, fmt.Errorf("re-watch failed: %w", err)
+	}
+	return watcher, nil
 }
 
 // CleanupExpiredNodes is a no-op for ZooKeeper as ephemeral nodes are automatically cleaned up

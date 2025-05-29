@@ -267,6 +267,7 @@ func (r *consulRegistry) GetWorkingNodes(ctx context.Context) ([]Node, error) {
 func (r *consulRegistry) WatchNodes(ctx context.Context) (<-chan NodeEvent, error) {
 	// Create a channel for node events with a defined buffer size
 	eventChan := make(chan NodeEvent, NodeEventChannelSize)
+	eventChan <- NodeEvent{Type: NodeEventTypeChanged}
 
 	// Define parameters for the Consul watch plan
 	params := map[string]interface{}{

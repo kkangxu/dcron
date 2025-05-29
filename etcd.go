@@ -217,6 +217,8 @@ func (r *etcdRegistry) WatchNodes(ctx context.Context) (<-chan NodeEvent, error)
 	watchChan := r.client.Watch(ctx, etcdNodePrefix, clientv3.WithPrefix())
 	eventChan := make(chan NodeEvent, NodeEventChannelSize)
 
+	eventChan <- NodeEvent{Type: NodeEventTypeChanged}
+
 	go func() {
 		defer close(eventChan)
 		for resp := range watchChan {

@@ -194,6 +194,7 @@ func (r *redisRegistry) GetWorkingNodes(ctx context.Context) ([]Node, error) {
 func (r *redisRegistry) WatchNodes(ctx context.Context) (<-chan NodeEvent, error) {
 	pubsub := r.client.Subscribe(ctx, redisChannelNodes)
 	eventChan := make(chan NodeEvent, NodeEventChannelSize)
+	eventChan <- NodeEvent{Type: NodeEventTypeChanged}
 
 	go func() {
 		defer pubsub.Close()
