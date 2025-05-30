@@ -243,22 +243,22 @@ func NewDcron(registry Registry, opts ...Option) Dcron {
 
 // AddTask adds a new static task. The taskName must be unique.
 func (dc *dcron) AddTask(taskName, cronFormat string, tasker Tasker) error {
-	return dc.addJob(taskName, cronFormat, tasker, false, false) // Add a regular task
+	return dc.addJob(taskName, cronFormat, tasker, false) // Add a regular task
 }
 
 // AddFunc adds a new static task using a function. The taskName must be unique.
 func (dc *dcron) AddFunc(taskName, cronFormat string, runner Runner) error {
-	return dc.addJob(taskName, cronFormat, runner, false, false) // Add a regular task with function
+	return dc.addJob(taskName, cronFormat, runner, false) // Add a regular task with function
 }
 
 // AddOneShotTask adds a new one-shot task. The taskName must be unique.
 func (dc *dcron) AddOneShotTask(taskName, cronFormat string, tasker Tasker) error {
-	return dc.addJob(taskName, cronFormat, tasker, true, false) // Add a one-shot task
+	return dc.addJob(taskName, cronFormat, tasker, true) // Add a one-shot task
 }
 
 // AddOneShotFunc adds a new one-shot task using a function. The taskName must be unique.
 func (dc *dcron) AddOneShotFunc(taskName, cronFormat string, runner Runner) error {
-	return dc.addJob(taskName, cronFormat, runner, true, false) // Add a one-shot task with function
+	return dc.addJob(taskName, cronFormat, runner, true) // Add a one-shot task with function
 }
 
 // AddTaskMeta adds a task using TaskMeta structure.
@@ -306,6 +306,7 @@ func (dc *dcron) ForceAddTask(taskName, cronFormat string, tasker Tasker) error 
 	dc.tasksRWMux.Lock()
 	defer dc.tasksRWMux.Unlock()
 
+	delete(dc.allTasks, taskName)
 	delete(dc.deletedTasks, taskName)
 	if t, ok := dc.assignedTasks[taskName]; ok {
 		if t.id != 0 {
@@ -314,17 +315,11 @@ func (dc *dcron) ForceAddTask(taskName, cronFormat string, tasker Tasker) error 
 		delete(dc.assignedTasks, taskName)
 	}
 
-	t := &task{
-		name:   taskName,
-		tasker: tasker,
-		metadata: &TaskMeta{
-			Name:       taskName,
-			CronFormat: cronFormat,
-		},
-		dc: dc,
+	if err := dc.addJobLocked(taskName, cronFormat, tasker, false); err != nil {
+		return fmt.Errorf("forced addition of task '%s' failed: %v", taskName, err)
 	}
-	dc.allTasks[taskName] = t                                                                                    // Add task to all tasks map
-	logger.Infof("Task '%s' successfully force-added to registry, overriding any previous task state", taskName) // Log force addition
+
+	logger.Infof("Task '%s' successfully force-added to registry, overriding any previous task state", taskName)
 	return nil
 }
 
@@ -343,6 +338,7 @@ func (dc *dcron) ForceAddOneShotTask(taskName, cronFormat string, tasker Tasker)
 	dc.tasksRWMux.Lock()
 	defer dc.tasksRWMux.Unlock()
 
+	delete(dc.allTasks, taskName)
 	delete(dc.deletedTasks, taskName)
 	if t, ok := dc.assignedTasks[taskName]; ok {
 		if t.id != 0 {
@@ -350,17 +346,11 @@ func (dc *dcron) ForceAddOneShotTask(taskName, cronFormat string, tasker Tasker)
 		}
 		delete(dc.assignedTasks, taskName)
 	}
-	t := &task{
-		name:   taskName,
-		tasker: tasker,
-		metadata: &TaskMeta{
-			Name:       taskName,
-			CronFormat: cronFormat,
-			OneShot:    true, // Mark as one-shot task
-		},
-		dc: dc,
+
+	if err := dc.addJobLocked(taskName, cronFormat, tasker, true); err != nil {
+		return fmt.Errorf("forced addition of task '%s' failed: %v", taskName, err)
 	}
-	dc.allTasks[taskName] = t                                                                              // Add task to all tasks map
+
 	logger.Infof("One-shot task '%s' successfully force-added to registry for single execution", taskName) // Log force addition
 	return nil
 }

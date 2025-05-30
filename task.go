@@ -8,10 +8,15 @@ import (
 )
 
 // addJob is the internal API for adding a task. It checks for deleted tasks before proceeding.
-func (dc *dcron) addJob(taskName, cronFormat string, tasker Tasker, oneShot, executedAndMarkDeleted bool) error {
+func (dc *dcron) addJob(taskName, cronFormat string, tasker Tasker, oneShot bool) error {
 
 	dc.tasksRWMux.Lock()
 	defer dc.tasksRWMux.Unlock()
+
+	return dc.addJobLocked(taskName, cronFormat, tasker, oneShot)
+}
+
+func (dc *dcron) addJobLocked(taskName, cronFormat string, tasker Tasker, oneShot bool) error {
 
 	if _, ok := dc.deletedTasks[taskName]; ok {
 		return ErrTaskDeleted
@@ -26,10 +31,9 @@ func (dc *dcron) addJob(taskName, cronFormat string, tasker Tasker, oneShot, exe
 		name:   taskName,
 		tasker: tasker,
 		metadata: &TaskMeta{
-			Name:                   taskName,
-			CronFormat:             cronFormat,
-			OneShot:                oneShot,
-			ExecutedAndMarkDeleted: executedAndMarkDeleted,
+			Name:       taskName,
+			CronFormat: cronFormat,
+			OneShot:    oneShot,
 		},
 		dc: dc,
 	}
