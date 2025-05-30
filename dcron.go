@@ -559,6 +559,21 @@ func (dc *dcron) GetAllTasks() []string {
 	return tasks
 }
 
+// GetRunningTasks retrieves the names of all tasks currently running.
+func (dc *dcron) GetRunningTasks() []string {
+	dc.tasksRWMux.RLock()
+	defer dc.tasksRWMux.RUnlock()
+
+	var tasks []string
+	for name := range dc.assignedTasks {
+		if _, ok := dc.deletedTasks[name]; ok {
+			continue
+		}
+		tasks = append(tasks, name)
+	}
+	return tasks
+}
+
 // GetMyselfRunningTasks retrieves the tasks running on the current node.
 func (dc *dcron) GetMyselfRunningTasks() []string {
 	dc.tasksRWMux.RLock()
