@@ -222,32 +222,33 @@ select {}
 package main
 
 import (
-	"github.com/kkangxu/dcron"
-	"github.com/hashicorp/consul/api"
-	"log"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    "github.com/kkangxu/dcron"
+    "github.com/hashicorp/consul/api"
+    "log"
+    "fmt"
 )
 
 func main() {
-	// 1. 配置 Consul 客户端
-	config := api.DefaultConfig()
-	config.Address = "localhost:8500" // Consul 服务地址
-	client, err := api.NewClient(config)
-	if err != nil {
-		log.Fatalf("创建 Consul 客户端失败: %v", err)
-	}
-
-	// 2. 创建 Dcron 实例，使用 Consul Registry
-	dc := dcron.NewDcron(dcron.NewConsulRegistry(client), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. 添加静态任务示例
-	err = dc.AddFunc("consul-static-task", "*/5 * * * * *", func() error {
-		log.Println("Consul Registry: 执行静态任务 (consul-static-task) 每5秒一次")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+    // 1. 配置 Consul 客户端
+    config := api.DefaultConfig()
+    config.Address = "localhost:8500" // Consul 服务地址
+    client, err := api.NewClient(config)
+    if err != nil {
+        log.Fatalf("创建 Consul 客户端失败: %v", err)
+    }
+    
+    // 2. 创建 Dcron 实例，使用 Consul Registry
+    dc := dcron.NewDcron(dcron.NewConsulRegistry(client), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. 添加静态任务示例
+    err = dc.AddFunc("consul-static-task", "*/5 * * * * *", func() error {
+        log.Println("Consul Registry: 执行静态任务 (consul-static-task) 每5秒一次")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
     
     // 4. 添加动态任务示例 (可选)
     err = dc.AddTaskMeta(dcron.TaskMeta{
@@ -258,15 +259,12 @@ func main() {
     if err != nil {
         log.Printf("添加动态任务 consul-dynamic-task 失败: %v", err) // 非致命错误，可以选择记录日志
     }
-
-	// 5. 启动服务
-	log.Println("Dcron (Consul) 服务启动中...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err)
-	}
     
-    // 保持服务运行
-    select{}
+    // 5. 启动服务
+    log.Println("Dcron (Consul) 服务启动中...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -276,38 +274,37 @@ func main() {
 package main
 
 import (
-	// "context" // 如果您的 Redis 操作需要 context
-	"github.com/kkangxu/dcron"
-	"github.com/redis/go-redis/v9"
-	"log"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    // "context" // 如果您的 Redis 操作需要 context
+    "github.com/kkangxu/dcron"
+    "github.com/redis/go-redis/v9"
+    "log"
+    "fmt"
 )
 
 func main() {
-	// 1. 初始化 Redis 客户端
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379", // Redis 服务地址
-	})
-
-	// 2. 创建 Dcron 实例，使用 Redis Registry
-	dc := dcron.NewDcron(dcron.NewRedisRegistry(rdb), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. 添加静态任务示例
-	err := dc.AddFunc("redis-static-task", "*/10 * * * * *", func() error {
-		log.Println("Redis Registry: 执行静态任务 (redis-static-task) 每10秒一次")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. 启动服务
-	log.Println("Dcron (Redis) 服务启动中...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err)
-	}
+    // 1. 初始化 Redis 客户端
+    rdb := redis.NewClient(&redis.Options{
+        Addr: "localhost:6379", // Redis 服务地址
+    })
     
-    select{}
+    // 2. 创建 Dcron 实例，使用 Redis Registry
+    dc := dcron.NewDcron(dcron.NewRedisRegistry(rdb), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. 添加静态任务示例
+    err := dc.AddFunc("redis-static-task", "*/10 * * * * *", func() error {
+        log.Println("Redis Registry: 执行静态任务 (redis-static-task) 每10秒一次")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. 启动服务
+    log.Println("Dcron (Redis) 服务启动中...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -317,43 +314,42 @@ func main() {
 package main
 
 import (
-	"github.com/kkangxu/dcron"
-	"go.etcd.io/etcd/client/v3"
-	"log"
-	"time"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    "github.com/kkangxu/dcron"
+    "go.etcd.io/etcd/client/v3"
+    "log"
+    "time"
+    "fmt"
 )
 
 func main() {
-	// 1. 初始化 Etcd 客户端
-	cli, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"localhost:2379"}, // Etcd 服务地址
-		DialTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		log.Fatalf("连接 Etcd 失败: %v", err)
-	}
-	defer cli.Close() // 确保客户端关闭
-
-	// 2. 创建 Dcron 实例，使用 Etcd Registry
-	dc := dcron.NewDcron(dcron.NewEtcdRegistry(cli), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. 添加静态任务示例
-	err = dc.AddFunc("etcd-static-task", "*/3 * * * * *", func() error {
-		log.Println("Etcd Registry: 执行静态任务 (etcd-static-task) 每3秒一次")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. 启动服务
-	log.Println("Dcron (Etcd) 服务启动中...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err)
-	}
+    // 1. 初始化 Etcd 客户端
+    cli, err := clientv3.New(clientv3.Config{
+        Endpoints:   []string{"localhost:2379"}, // Etcd 服务地址
+        DialTimeout: 5 * time.Second,
+    })
+    if err != nil {
+        log.Fatalf("连接 Etcd 失败: %v", err)
+    }
+    defer cli.Close() // 确保客户端关闭
     
-    select{}
+    // 2. 创建 Dcron 实例，使用 Etcd Registry
+    dc := dcron.NewDcron(dcron.NewEtcdRegistry(cli), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. 添加静态任务示例
+    err = dc.AddFunc("etcd-static-task", "*/3 * * * * *", func() error {
+        log.Println("Etcd Registry: 执行静态任务 (etcd-static-task) 每3秒一次")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. 启动服务
+    log.Println("Dcron (Etcd) 服务启动中...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -363,40 +359,39 @@ func main() {
 package main
 
 import (
-	"github.com/kkangxu/dcron"
-	"github.com/go-zookeeper/zk"
-	"log"
-	"time"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    "github.com/kkangxu/dcron"
+    "github.com/go-zookeeper/zk"
+    "log"
+    "time"
+    "fmt"
 )
 
 func main() {
-	// 1. 连接 ZooKeeper
-	conn, _, err := zk.Connect([]string{"127.0.0.1:2181"}, time.Second*5) // ZooKeeper 服务地址
-	if err != nil {
-		log.Fatalf("连接 ZooKeeper 失败: %v", err)
-	}
-	// defer conn.Close() // 通常 zk.Conn 由 dcron 内部管理其生命周期，除非您有特殊需求
-
-	// 2. 创建 Dcron 实例，使用 ZooKeeper Registry
-	dc := dcron.NewDcron(dcron.NewZookeeperRegistry(conn), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. 添加静态任务示例
-	err = dc.AddFunc("zk-static-task", "*/2 * * * * *", func() error {
-		log.Println("ZooKeeper Registry: 执行静态任务 (zk-static-task) 每2秒一次")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. 启动服务
-	log.Println("Dcron (ZooKeeper) 服务启动中...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err)
-	}
+    // 1. 连接 ZooKeeper
+    conn, _, err := zk.Connect([]string{"127.0.0.1:2181"}, time.Second*5) // ZooKeeper 服务地址
+    if err != nil {
+        log.Fatalf("连接 ZooKeeper 失败: %v", err)
+    }
+    // defer conn.Close() // 通常 zk.Conn 由 dcron 内部管理其生命周期，除非您有特殊需求
     
-    select{}
+    // 2. 创建 Dcron 实例，使用 ZooKeeper Registry
+    dc := dcron.NewDcron(dcron.NewZookeeperRegistry(conn), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. 添加静态任务示例
+    err = dc.AddFunc("zk-static-task", "*/2 * * * * *", func() error {
+        log.Println("ZooKeeper Registry: 执行静态任务 (zk-static-task) 每2秒一次")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. 启动服务
+    log.Println("Dcron (ZooKeeper) 服务启动中...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -495,13 +490,11 @@ dc := dcron.NewDcron(
 您可以通过 `WithErrHandler` 选项注入自定义的任务执行错误处理函数。这对于集中记录错误、发送告警或执行特定的错误恢复逻辑非常有用。
 
 ```go
-import "github.com/kkangxu/dcron/logger" // 假设您使用了 dcron 的 logger
-
 dc := dcron.NewDcron(
     registry,
     dcron.WithErrHandler(func(task *dcron.TaskMeta, err error) {
         // 使用您项目的日志系统记录错误
-        logger.Errorf("任务 '%s' (Payload: %s) 执行失败: %v", task.Name, task.Payload, err)
+        fmt.Errorf("任务 '%s' (Payload: %s) 执行失败: %v", task.Name, task.Payload, err)
         // 此处可以添加告警逻辑，例如发送邮件或 webhook
     }),
     // ... 其他 options
@@ -644,7 +637,7 @@ const (
 ```go
 // NodeEvent 表示一个节点变化事件
 type NodeEvent struct {
-    Type NodeEventType // 事件类型: NodeEventTypePut (新增/更新), NodeEventTypeDelete (删除)
+    Type NodeEventType // 事件类型: NodeEventTypePut (新增/更新), NodeEventTypeDelete (删除),  NodeEventTypeChanged (watch node 启动后，发送该事件)
     Node Node          // 相关的节点信息
 }
 
@@ -654,7 +647,7 @@ type NodeEventType string
 const (
     NodeEventTypePut    NodeEventType = "put"    // 节点新增或信息更新
     NodeEventTypeDelete NodeEventType = "delete" // 节点删除
-    // NodeEventTypeChanged NodeEventType = "changed" // (在某些实现中可能细化为 changed，但通常 put 覆盖了更新场景)
+    NodeEventTypeChanged NodeEventType = "changed" // watch node 启动后，发送该事件
 )
 
 // TaskMetaEvent 表示一个任务元数据变化事件

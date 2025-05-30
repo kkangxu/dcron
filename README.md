@@ -204,9 +204,6 @@ log.Println("Dcron service is about to start...")
 if err := dc.Start(); err != nil {
     log.Fatalf("Failed to start Dcron service: %v", err)
 }
-
-// Block the main goroutine, or handle according to your application logic
-select {}
 ```
 
 ---
@@ -221,32 +218,33 @@ select {}
 package main
 
 import (
-	"github.com/kkangxu/dcron"
-	"github.com/hashicorp/consul/api"
-	"log"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    "github.com/kkangxu/dcron"
+    "github.com/hashicorp/consul/api"
+    "log"
+    "fmt"
 )
 
 func main() {
-	// 1. Configure Consul client
-	config := api.DefaultConfig()
-	config.Address = "localhost:8500" // Consul service address
-	client, err := api.NewClient(config)
-	if err != nil {
-		log.Fatalf("Failed to create Consul client: %v", err)
-	}
-
-	// 2. Create Dcron instance using Consul Registry
-	dc := dcron.NewDcron(dcron.NewConsulRegistry(client), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. Add static task example
-	err = dc.AddFunc("consul-static-task", "*/5 * * * * *", func() error {
-		log.Println("Consul Registry: Executing static task (consul-static-task) every 5 seconds")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
+    // 1. Configure Consul client
+    config := api.DefaultConfig()
+    config.Address = "localhost:8500" // Consul service address
+    client, err := api.NewClient(config)
+    if err != nil {
+        log.Fatalf("Failed to create Consul client: %v", err)
+    }
+    
+    // 2. Create Dcron instance using Consul Registry
+    dc := dcron.NewDcron(dcron.NewConsulRegistry(client), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. Add static task example
+    err = dc.AddFunc("consul-static-task", "*/5 * * * * *", func() error {
+        log.Println("Consul Registry: Executing static task (consul-static-task) every 5 seconds")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
     
     // 4. Add dynamic task example (optional)
     err = dc.AddTaskMeta(dcron.TaskMeta{
@@ -257,15 +255,12 @@ func main() {
     if err != nil {
         log.Printf("Failed to add dynamic task consul-dynamic-task: %v", err) // Non-fatal error, can choose to log
     }
-
-	// 5. Start the service
-	log.Println("Dcron (Consul) service is starting...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err)
-	}
     
-    // Keep the service running
-    select{}
+    // 5. Start the service
+    log.Println("Dcron (Consul) service is starting...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -275,38 +270,37 @@ func main() {
 package main
 
 import (
-	// "context" // If your Redis operations require context
-	"github.com/kkangxu/dcron"
-	"github.com/redis/go-redis/v9"
-	"log"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    // "context" // If your Redis operations require context
+    "github.com/kkangxu/dcron"
+    "github.com/redis/go-redis/v9"
+    "log"
+    "fmt"
 )
 
 func main() {
-	// 1. Initialize Redis client
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379", // Redis service address
-	})
-
-	// 2. Create Dcron instance using Redis Registry
-	dc := dcron.NewDcron(dcron.NewRedisRegistry(rdb), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. Add static task example
-	err := dc.AddFunc("redis-static-task", "*/10 * * * * *", func() error {
-		log.Println("Redis Registry: Executing static task (redis-static-task) every 10 seconds")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. Start the service
-	log.Println("Dcron (Redis) service is starting...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err);
-	}
+    // 1. Initialize Redis client
+    rdb := redis.NewClient(&redis.Options{
+        Addr: "localhost:6379", // Redis service address
+    })
     
-    select{}
+    // 2. Create Dcron instance using Redis Registry
+    dc := dcron.NewDcron(dcron.NewRedisRegistry(rdb), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. Add static task example
+    err := dc.AddFunc("redis-static-task", "*/10 * * * * *", func() error {
+        log.Println("Redis Registry: Executing static task (redis-static-task) every 10 seconds")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. Start the service
+    log.Println("Dcron (Redis) service is starting...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err);
+    }
 }
 ```
 
@@ -316,43 +310,42 @@ func main() {
 package main
 
 import (
-	"github.com/kkangxu/dcron"
-	"go.etcd.io/etcd/client/v3"
-	"log"
-	"time"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    "github.com/kkangxu/dcron"
+    "go.etcd.io/etcd/client/v3"
+    "log"
+    "time"
+    "fmt"
 )
 
 func main() {
-	// 1. Initialize Etcd client
-	cli, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{"localhost:2379"}, // Etcd service address
-		DialTimeout: 5 * time.Second,
-	})
-	if err != nil {
-		log.Fatalf("Failed to connect to Etcd: %v", err)
-	}
-	defer cli.Close() // Ensure the client is closed
-
-	// 2. Create Dcron instance using Etcd Registry
-	dc := dcron.NewDcron(dcron.NewEtcdRegistry(cli), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. Add static task example
-	err = dc.AddFunc("etcd-static-task", "*/3 * * * * *", func() error {
-		log.Println("Etcd Registry: Executing static task (etcd-static-task) every 3 seconds")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. Start the service
-	log.Println("Dcron (Etcd) service is starting...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err);
-	}
+    // 1. Initialize Etcd client
+    cli, err := clientv3.New(clientv3.Config{
+        Endpoints:   []string{"localhost:2379"}, // Etcd service address
+        DialTimeout: 5 * time.Second,
+    })
+    if err != nil {
+        log.Fatalf("Failed to connect to Etcd: %v", err)
+    }
+    defer cli.Close() // Ensure the client is closed
     
-    select{}
+    // 2. Create Dcron instance using Etcd Registry
+    dc := dcron.NewDcron(dcron.NewEtcdRegistry(cli), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. Add static task example
+    err = dc.AddFunc("etcd-static-task", "*/3 * * * * *", func() error {
+        log.Println("Etcd Registry: Executing static task (etcd-static-task) every 3 seconds")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. Start the service
+    log.Println("Dcron (Etcd) service is starting...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -362,40 +355,39 @@ func main() {
 package main
 
 import (
-	"github.com/kkangxu/dcron"
-	"github.com/go-zookeeper/zk"
-	"log"
-	"time"
-	"fmt"
+    "github.com/robfig/cron/v3"
+    "github.com/kkangxu/dcron"
+    "github.com/go-zookeeper/zk"
+    "log"
+    "time"
+    "fmt"
 )
 
 func main() {
-	// 1. Connect to ZooKeeper
-	conn, _, err := zk.Connect([]string{"127.0.0.1:2181"}, time.Second*5) // ZooKeeper service address
-	if err != nil {
-		log.Fatalf("Failed to connect to ZooKeeper: %v", err)
-	}
-	// defer conn.Close() // Typically, zk.Conn is managed internally by dcron, unless you have special needs
-
-	// 2. Create Dcron instance using ZooKeeper Registry
-	dc := dcron.NewDcron(dcron.NewZookeeperRegistry(conn), dcron.WithStrategy(dcron.StrategyConsistent))
-
-	// 3. Add static task example
-	err = dc.AddFunc("zk-static-task", "*/2 * * * * *", func() error {
-		log.Println("ZooKeeper Registry: Executing static task (zk-static-task) every 2 seconds")
-		return nil
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// 4. Start the service
-	log.Println("Dcron (ZooKeeper) service is starting...")
-	if err := dc.Start(); err != nil {
-		log.Fatal(err);
-	}
+    // 1. Connect to ZooKeeper
+    conn, _, err := zk.Connect([]string{"127.0.0.1:2181"}, time.Second*5) // ZooKeeper service address
+    if err != nil {
+        log.Fatalf("Failed to connect to ZooKeeper: %v", err)
+    }
+    // defer conn.Close() // Typically, zk.Conn is managed internally by dcron, unless you have special needs
     
-    select{}
+    // 2. Create Dcron instance using ZooKeeper Registry
+    dc := dcron.NewDcron(dcron.NewZookeeperRegistry(conn), dcron.WithStrategy(dcron.StrategyConsistent), dcron.WithCronOptions(cron.WithSeconds()))
+    
+    // 3. Add static task example
+    err = dc.AddFunc("zk-static-task", "*/2 * * * * *", func() error {
+        log.Println("ZooKeeper Registry: Executing static task (zk-static-task) every 2 seconds")
+        return nil
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    // 4. Start the service
+    log.Println("Dcron (ZooKeeper) service is starting...")
+    if err := dc.Start(); err != nil {
+        log.Fatal(err)
+    }
 }
 ```
 
@@ -492,13 +484,12 @@ dc := dcron.NewDcron(
 You can inject a custom error handling function for task execution through the `WithErrHandler` option. This is useful for centralized error logging, sending alerts, or executing specific recovery logic.
 
 ```go
-import "github.com/kkangxu/dcron/logger" // Assuming you are using dcron's logger
 
 dc := dcron.NewDcron(
     registry,
     dcron.WithErrHandler(func(task *dcron.TaskMeta, err error) {
         // Use your project's logging system to log the error
-        logger.Errorf("Task '%s' (Payload: %s) execution failed: %v", task.Name, task.Payload, err)
+        fmt.Errorf("Task '%s' (Payload: %s) execution failed: %v", task.Name, task.Payload, err)
         // You can add alert logic here, such as sending emails or webhooks
     }),
     // ... Other options
@@ -641,7 +632,7 @@ const (
 ```go
 // NodeEvent represents a node change event
 type NodeEvent struct {
-    Type NodeEventType // Event type: NodeEventTypePut (add/update), NodeEventTypeDelete (delete)
+    Type NodeEventType // Event type: NodeEventTypePut (add/update), NodeEventTypeDelete (delete), NodeEventTypeChanged (changed) after the watch node is started, send this event.
     Node Node          // Related node information
 }
 
@@ -651,6 +642,7 @@ type NodeEventType string
 const (
     NodeEventTypePut    NodeEventType = "put"    // Node added or updated
     NodeEventTypeDelete NodeEventType = "delete" // Node deleted
+    NodeEventTypeChanged NodeEventType = "changed" // Node changed event (details not specified)
 )
 
 // TaskMetaEvent represents a task metadata change event
